@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My Bitstamp Balance</title>
+  </head>
+  <body>
+    <h1>My Bitstamp Balance</h1>
+    <p>Balance: <span id="balance">Loading...</span></p>
+    <button onclick="getBalance()">Refresh Balance</button>
+
+    <script>
+      // Define the function that sends a POST request to the server to retrieve the account balance
+      function getBalance() {
+        fetch('http://localhost:8080/balance', {
+          method: 'POST'
+        })
+          .then(response => response.json())
+          .then(data => {
+            // Display the account balance on the web page
+            document.getElementById('balance').innerHTML = data.balance;
+          })
+          .catch(error => {
+            console.error('Error retrieving account balance:', error);
+          });
+      }
+    </script>
+  </body>
+</html>
