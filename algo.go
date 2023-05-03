@@ -12,6 +12,7 @@ import (
 	"errors"
 	"hash"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -83,31 +84,49 @@ func main() {
 			log.Printf(`bitstampdollarbalance: %+[1]v`, bitstampdollarbalance)
 			log.Printf(`valrbitcoinbalance: %+[1]v`, valrbitcoinbalance)
 
-			bitstampdollarbalance *= 0.02
-			valrbitcoinbalance *= 0.02
+			var bitstampdollarlimit = RoundFloat(bitstampdollarbalance*0.02, 2)
+			var valrbitcoinlimit = RoundFloat(valrbitcoinbalance*0.04, 8)
 
-			log.Printf(`bitstampdollarbalance: %+[1]v`, bitstampdollarbalance)
-			log.Printf(`valrbitcoinbalance: %+[1]v`, valrbitcoinbalance)
+			log.Printf(`bitstampdollarlimit: %+[1]v`, bitstampdollarlimit)
+			log.Printf(`valrbitcoinlimit: %+[1]v`, valrbitcoinlimit)
 
 			var bitstampbuyable Depth = GetBitstampBuyableLiquidity(bitstampkey, bitstampsecret, bitstampcustomer, bitstamphost)
 
-			var bitstamptrade Trade = CalculateTrade(bitstampbuyable, bitstampdollarbalance)
+			var bitstamptrade Trade = CalculateTrade(bitstampbuyable, bitstampdollarlimit)
 
-			if bitstamptrade.NotionalAmount == bitstampdollarbalance {
+			if bitstamptrade.NotionalAmount == bitstampdollarlimit {
 
 				var valrrandnotional float64 = bitstamptrade.NotionalAmount * exchangerate
+				valrrandnotional = RoundFloat(valrrandnotional, 2)
 
 				var valrsellable Depth = GetValrSellableLiquidity(valrkey, valrsecret, valrhost)
 
 				var valrtrade Trade = CalculateTrade(valrsellable, valrrandnotional)
 
-				if valrtrade.NotionalAmount == valrrandnotional && valrtrade.BaseAmount <= valrbitcoinbalance {
+				if valrtrade.NotionalAmount == valrrandnotional && valrtrade.BaseAmount <= valrbitcoinlimit {
 
 					var bitcoinprofitpercent float64 = CalculateProfit(bitstamptrade.BaseAmount, valrtrade.BaseAmount)
 
 					log.Printf(`bitcoinprofitpercent: %+[1]v`, bitcoinprofitpercent)
 
 					if bitcoinprofitpercent >= profitmargin {
+
+						log.Printf(`bitstamptrade: %+[1]v`, bitstamptrade)
+						log.Printf(`valrtrade: %+[1]v`, valrtrade)
+
+						var bitstampcontra float64
+						bitstampcontra = valrtrade.QuoteAmount / exchangerate / (1.0 + profitmargin)
+						bitstampcontra = RoundFloat(bitstampcontra, 0)
+
+						var valrcontra float64
+						valrcontra = bitstamptrade.QuoteAmount * exchangerate * (1.0 + profitmargin)
+						valrcontra = RoundFloat(valrcontra, 0)
+
+						log.Printf(`bitstampcontra: %+[1]v`, bitstampcontra)
+						log.Printf(`valrcontra: %+[1]v`, valrcontra)
+
+						bitstamptrade.QuoteAmount = bitstampcontra
+						valrtrade.QuoteAmount = valrcontra
 
 						log.Printf(`bitstamptrade: %+[1]v`, bitstamptrade)
 						log.Printf(`valrtrade: %+[1]v`, valrtrade)
@@ -144,7 +163,7 @@ func main() {
 								valrhost,
 								ValrLimitOrder{
 									Side:            `SELL`,
-									Quantity:        strconv.FormatFloat(valrtrade.BaseAmount, 'g', 1, 64),
+									Quantity:        strconv.FormatFloat(valrtrade.BaseAmount, 'f', 8, 64),
 									Price:           strconv.FormatFloat(valrtrade.QuoteAmount, 'f', 2, 64),
 									Pair:            `BTCZAR`,
 									PostOnly:        `False`,
@@ -199,10 +218,15 @@ func main() {
 			}
 		}
 
-		// time.Sleep(time.Second * 3)
+		// time.Sleep(time.Second)
 
 		os.Exit(0)
 	}
+}
+
+func RoundFloat(value float64, precision uint) float64 {
+	ratio := math.Pow(10, float64(precision))
+	return math.Round(value*ratio) / ratio
 }
 
 func ReadCsv(filename string) (csvlines [][]string, err error) {
@@ -269,6 +293,7 @@ func CalculateTrade(depth Depth, notional float64) (trade Trade) {
 
 			depthlevel.NotionalAmount += depthlevel.BaseAmount
 			depthlevel.NotionalAmount *= depthlevel.QuoteAmount
+			depthlevel.NotionalAmount = RoundFloat(depthlevel.NotionalAmount, 2)
 
 			depthlevel.BaseTotal = 0.0
 
@@ -317,6 +342,7 @@ func CalculateTrade(depth Depth, notional float64) (trade Trade) {
 			trade.BaseAmount += depthlevel.BaseAmount
 			trade.BaseAmount *= notionallimitpercent
 			trade.BaseAmount += depthlevel.BaseAhead
+			trade.BaseAmount = RoundFloat(trade.BaseAmount, 8)
 
 			trade.NotionalAmount = notional
 		}
@@ -346,6 +372,8 @@ func GetBitstampDollarBalance(bitstampkey string, bitstampsecret string, bitstam
 
 		return
 	}
+
+	bitstampdollarbalance = RoundFloat(bitstampdollarbalance, 2)
 
 	return
 }
@@ -382,6 +410,8 @@ func GetValrBitcoinBalance(valrkey string, valrsecret string, valrhost string) (
 			}
 		}
 	}
+
+	valrbitcoinbalance = RoundFloat(valrbitcoinbalance, 8)
 
 	return
 }
@@ -560,8 +590,8 @@ func PostBitstampAccountBalances(bitstampkey string, bitstampsecret string, bits
 func PostBitstampBuyLimitOrder(bitstampkey string, bitstampsecret string, bitstampcustomer string, bitstamphost string, currencypair string, amount float64, price float64, day bool, ioc bool, fok bool) (bitstamporder BitstampOrder, err error) {
 
 	var requestvalues url.Values = url.Values{
-		`amount`:      []string{strconv.FormatFloat(amount, 'g', 1, 64)},
-		`price`:       []string{strconv.FormatFloat(price, 'f', 2, 64)},
+		`amount`:      []string{strconv.FormatFloat(amount, 'f', 8, 64)},
+		`price`:       []string{strconv.FormatFloat(price, 'f', 0, 64)},
 		`daily_order`: []string{strconv.FormatBool(day)},
 		`ioc_order`:   []string{strconv.FormatBool(ioc)},
 		`fok_order`:   []string{strconv.FormatBool(fok)},
