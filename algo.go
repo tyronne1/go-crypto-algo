@@ -53,25 +53,33 @@ func main() {
 			var valrkey string = account[3]
 			var valrsecret string = account[4]
 
+			var dollarlimit float64
 			var exchangerate float64
 			var profitmargin float64
 			var executetrade bool
 
-			if exchangerate, err = strconv.ParseFloat(account[5], 64); err != nil {
+			if dollarlimit, err = strconv.ParseFloat(account[5], 64); err != nil {
 
 				log.Panic(err)
 
 				return
 			}
 
-			if profitmargin, err = strconv.ParseFloat(account[6], 64); err != nil {
+			if exchangerate, err = strconv.ParseFloat(account[6], 64); err != nil {
 
 				log.Panic(err)
 
 				return
 			}
 
-			if executetrade, err = strconv.ParseBool(account[7]); err != nil {
+			if profitmargin, err = strconv.ParseFloat(account[7], 64); err != nil {
+
+				log.Panic(err)
+
+				return
+			}
+
+			if executetrade, err = strconv.ParseBool(account[8]); err != nil {
 
 				log.Panic(err)
 
@@ -84,135 +92,131 @@ func main() {
 			log.Printf(`bitstampdollarbalance: %+[1]v`, bitstampdollarbalance)
 			log.Printf(`valrbitcoinbalance: %+[1]v`, valrbitcoinbalance)
 
-			var bitstampdollarlimit = RoundFloat(bitstampdollarbalance*0.02, 2)
-			var valrbitcoinlimit = RoundFloat(valrbitcoinbalance*0.04, 8)
-
-			log.Printf(`bitstampdollarlimit: %+[1]v`, bitstampdollarlimit)
-			log.Printf(`valrbitcoinlimit: %+[1]v`, valrbitcoinlimit)
+			var bitstampdollarlimit = RoundFloat(dollarlimit, 2)
 
 			var bitstampbuyable Depth = GetBitstampBuyableLiquidity(bitstampkey, bitstampsecret, bitstampcustomer, bitstamphost)
+			var bitstamptradeable Trade = CalculateTrade(bitstampbuyable, bitstampdollarlimit)
 
-			var bitstamptrade Trade = CalculateTrade(bitstampbuyable, bitstampdollarlimit)
+			log.Printf(`bitstamptradeable: %+[1]v`, bitstamptradeable)
 
-			if bitstamptrade.NotionalAmount == bitstampdollarlimit {
+			var valrrandnotional float64 = bitstamptradeable.NotionalAmount * exchangerate
+			valrrandnotional = RoundFloat(valrrandnotional, 2)
 
-				var valrrandnotional float64 = bitstamptrade.NotionalAmount * exchangerate
-				valrrandnotional = RoundFloat(valrrandnotional, 2)
+			var valrsellable Depth = GetValrSellableLiquidity(valrkey, valrsecret, valrhost)
 
-				var valrsellable Depth = GetValrSellableLiquidity(valrkey, valrsecret, valrhost)
+			var valrtradeable Trade = CalculateTrade(valrsellable, valrrandnotional)
 
-				var valrtrade Trade = CalculateTrade(valrsellable, valrrandnotional)
+			log.Printf(`valrtradeable: %+[1]v`, valrtradeable)
 
-				if valrtrade.NotionalAmount == valrrandnotional && valrtrade.BaseAmount <= valrbitcoinlimit {
+			if bitstamptradeable.NotionalAmount == bitstampdollarlimit && valrtradeable.NotionalAmount == valrrandnotional && bitstampdollarlimit <= bitstampdollarbalance && valrtradeable.BaseAmount <= valrbitcoinbalance {
 
-					var bitcoinprofitpercent float64 = CalculateProfit(bitstamptrade.BaseAmount, valrtrade.BaseAmount)
+				var bitcoinprofitpercent float64 = CalculateProfit(bitstamptradeable.BaseAmount, valrtradeable.BaseAmount)
 
-					log.Printf(`bitcoinprofitpercent: %+[1]v`, bitcoinprofitpercent)
+				log.Printf(`bitcoinprofitpercent: %+[1]v`, bitcoinprofitpercent)
 
-					if bitcoinprofitpercent >= profitmargin {
+				if bitcoinprofitpercent >= profitmargin {
 
-						log.Printf(`bitstamptrade: %+[1]v`, bitstamptrade)
-						log.Printf(`valrtrade: %+[1]v`, valrtrade)
+					var bitstamplimitprice float64
+					bitstamplimitprice = valrtradeable.QuoteAmount / exchangerate / (1.0 + profitmargin)
+					bitstamplimitprice = RoundFloat(bitstamplimitprice, 0)
 
-						var bitstampcontra float64
-						bitstampcontra = valrtrade.QuoteAmount / exchangerate / (1.0 + profitmargin)
-						bitstampcontra = RoundFloat(bitstampcontra, 0)
+					var valrlimitprice float64
+					valrlimitprice = bitstamptradeable.QuoteAmount * exchangerate * (1.0 + profitmargin)
+					valrlimitprice = RoundFloat(valrlimitprice, 0)
 
-						var valrcontra float64
-						valrcontra = bitstamptrade.QuoteAmount * exchangerate * (1.0 + profitmargin)
-						valrcontra = RoundFloat(valrcontra, 0)
+					log.Printf(`bitstamplimitprice: %+[1]v`, bitstamplimitprice)
+					log.Printf(`valrlimitprice: %+[1]v`, valrlimitprice)
 
-						log.Printf(`bitstampcontra: %+[1]v`, bitstampcontra)
-						log.Printf(`valrcontra: %+[1]v`, valrcontra)
+					var bitstamptrade Trade = Trade{BaseAmount: bitstamptradeable.BaseAmount, QuoteAmount: bitstamplimitprice, NotionalAmount: bitstamptradeable.NotionalAmount}
+					var valrtrade Trade = Trade{BaseAmount: valrtradeable.BaseAmount, QuoteAmount: valrlimitprice, NotionalAmount: valrtradeable.NotionalAmount}
 
-						bitstamptrade.QuoteAmount = bitstampcontra
-						valrtrade.QuoteAmount = valrcontra
+					bitstamptrade.QuoteAmount = bitstamplimitprice
+					valrtrade.QuoteAmount = valrlimitprice
 
-						log.Printf(`bitstamptrade: %+[1]v`, bitstamptrade)
-						log.Printf(`valrtrade: %+[1]v`, valrtrade)
+					log.Printf(`bitstamptrade: %+[1]v`, bitstamptrade)
+					log.Printf(`valrtrade: %+[1]v`, valrtrade)
 
-						if executetrade {
+					if executetrade {
 
-							var bitstamporder BitstampOrder
+						var bitstamporder BitstampOrder
 
-							if bitstamporder, err = PostBitstampBuyLimitOrder(
-								bitstampkey,
-								bitstampsecret,
-								bitstampcustomer,
-								bitstamphost,
-								`btcusd`,
-								bitstamptrade.BaseAmount,
-								bitstamptrade.QuoteAmount,
-								false,
-								true,
-								false,
-							); err != nil {
+						if bitstamporder, err = PostBitstampBuyLimitOrder(
+							bitstampkey,
+							bitstampsecret,
+							bitstampcustomer,
+							bitstamphost,
+							`btcusd`,
+							bitstamptrade.BaseAmount,
+							bitstamptrade.QuoteAmount,
+							false,
+							true,
+							false,
+						); err != nil {
 
-								log.Panic(err)
+							log.Panic(err)
 
-								return
-							}
-
-							log.Printf(`bitstamporder: %+[1]v`, bitstamporder)
-
-							var valrorderid ValrOrderId
-
-							if valrorderid, err = PostValrLimitOrder(
-								valrkey,
-								valrsecret,
-								valrhost,
-								ValrLimitOrder{
-									Side:            `SELL`,
-									Quantity:        strconv.FormatFloat(valrtrade.BaseAmount, 'f', 8, 64),
-									Price:           strconv.FormatFloat(valrtrade.QuoteAmount, 'f', 2, 64),
-									Pair:            `BTCZAR`,
-									PostOnly:        `False`,
-									CustomerOrderId: `1234567890`,
-									TimeInForce:     `IOC`,
-								},
-							); err != nil {
-
-								log.Panic(err)
-
-								return
-							}
-
-							log.Printf(`valrorderid: %+[1]v`, valrorderid)
-
-							var bitstamporderstatus BitstampOrderStatus
-
-							if bitstamporderstatus, err = PostBitstampOrderStatus(
-								bitstampkey,
-								bitstampsecret,
-								bitstampcustomer,
-								bitstamphost,
-								bitstamporder.Id,
-							); err != nil {
-
-								log.Panic(err)
-
-								return
-							}
-
-							log.Printf(`bitstamporderstatus: %+[1]v`, bitstamporderstatus)
-
-							var valrorderstatus ValrOrderStatus
-
-							if valrorderstatus, err = GetValrOrderStatus(
-								valrkey,
-								valrsecret,
-								valrhost,
-								`btczar`,
-								valrorderid.Id,
-							); err != nil {
-
-								log.Panic(err)
-
-								return
-							}
-
-							log.Printf(`valrorderstatus: %+[1]v`, valrorderstatus)
+							return
 						}
+
+						log.Printf(`bitstamporder: %+[1]v`, bitstamporder)
+
+						var valrorderid ValrOrderId
+
+						if valrorderid, err = PostValrLimitOrder(
+							valrkey,
+							valrsecret,
+							valrhost,
+							ValrLimitOrder{
+								Side:            `SELL`,
+								Quantity:        strconv.FormatFloat(valrtrade.BaseAmount, 'f', 8, 64),
+								Price:           strconv.FormatFloat(valrtrade.QuoteAmount, 'f', 2, 64),
+								Pair:            `BTCZAR`,
+								PostOnly:        `False`,
+								CustomerOrderId: `1234567890`,
+								TimeInForce:     `IOC`,
+							},
+						); err != nil {
+
+							log.Panic(err)
+
+							return
+						}
+
+						log.Printf(`valrorderid: %+[1]v`, valrorderid)
+
+						var bitstamporderstatus BitstampOrderStatus
+
+						if bitstamporderstatus, err = PostBitstampOrderStatus(
+							bitstampkey,
+							bitstampsecret,
+							bitstampcustomer,
+							bitstamphost,
+							bitstamporder.Id,
+						); err != nil {
+
+							log.Panic(err)
+
+							return
+						}
+
+						log.Printf(`bitstamporderstatus: %+[1]v`, bitstamporderstatus)
+
+						var valrorderstatus ValrOrderStatus
+
+						if valrorderstatus, err = GetValrOrderStatus(
+							valrkey,
+							valrsecret,
+							valrhost,
+							`btczar`,
+							valrorderid.Id,
+						); err != nil {
+
+							log.Panic(err)
+
+							return
+						}
+
+						log.Printf(`valrorderstatus: %+[1]v`, valrorderstatus)
 					}
 				}
 			}
