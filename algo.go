@@ -31,6 +31,38 @@ func main() {
 
 		const valrhost string = `api.valr.com`
 
+		var exchangerates [][]string
+
+		if exchangerates, err = ReadCsv(`eurofxref-daily.csv`); err != nil {
+
+			log.Panic(err)
+
+			return
+		}
+
+		var dollareuroexchangerate float64
+		var randeuroexchangerate float64
+
+		if dollareuroexchangerate, err = strconv.ParseFloat(exchangerates[0][0], 64); err != nil {
+
+			log.Panic(err)
+
+			return
+		}
+
+		if randeuroexchangerate, err = strconv.ParseFloat(exchangerates[0][1], 64); err != nil {
+
+			log.Panic(err)
+
+			return
+		}
+
+		var exchangerate float64 = randeuroexchangerate / dollareuroexchangerate
+
+		log.Printf(`dollareuroexchangerate: %+[1]v`, dollareuroexchangerate)
+		log.Printf(`randeuroexchangerate: %+[1]v`, randeuroexchangerate)
+		log.Printf(`exchangerate: %+[1]v`, exchangerate)
+
 		var accounts [][]string
 
 		if accounts, err = ReadCsv(os.Args[1]); err != nil {
@@ -54,7 +86,6 @@ func main() {
 			var valrsecret string = account[4]
 
 			var dollarlimit float64
-			var exchangerate float64
 			var profitmargin float64
 			var executetrade bool
 
@@ -65,21 +96,14 @@ func main() {
 				return
 			}
 
-			if exchangerate, err = strconv.ParseFloat(account[6], 64); err != nil {
+			if profitmargin, err = strconv.ParseFloat(account[6], 64); err != nil {
 
 				log.Panic(err)
 
 				return
 			}
 
-			if profitmargin, err = strconv.ParseFloat(account[7], 64); err != nil {
-
-				log.Panic(err)
-
-				return
-			}
-
-			if executetrade, err = strconv.ParseBool(account[8]); err != nil {
+			if executetrade, err = strconv.ParseBool(account[7]); err != nil {
 
 				log.Panic(err)
 
